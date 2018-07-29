@@ -18,6 +18,7 @@ import (
 	"overlord/proto/memcache"
 	mcbin "overlord/proto/memcache/binary"
 	"overlord/proto/redis"
+	rdsclus "overlord/proto/redis/cluster"
 
 	"github.com/pkg/errors"
 )
@@ -28,6 +29,7 @@ var (
 	ErrClusterHashNoNode   = errs.New("cluster hash no hit node")
 )
 
+// TODO(felix): refactor health check!!!
 type pinger struct {
 	ping   proto.NodeConn
 	node   string
@@ -37,6 +39,7 @@ type pinger struct {
 	retries int
 }
 
+// TODO(felix): refactor router!!!
 type batchChanel struct {
 	idx int32
 	cnt int32
@@ -64,7 +67,8 @@ type Cluster struct {
 
 	hashTag []byte
 
-	ring *hashkit.HashRing
+	ring   *hashkit.HashRing // TODO(felix): refactor router!!!
+	router proto.Router
 
 	alias    bool
 	nodeMap  map[string]int
@@ -87,15 +91,21 @@ func NewCluster(ctx context.Context, cc *ClusterConfig) (c *Cluster) {
 	if len(cc.HashTag) == 2 {
 		c.hashTag = []byte{cc.HashTag[0], cc.HashTag[1]}
 	}
-	c.alias = alias
+	if cc.CacheType != proto.CacheTypeRedisCluster {
+		c.alias = alias
+	}
 	// hash ring
-	ring := hashkit.NewRing(cc.HashDistribution, cc.HashMethod)
 	if cc.CacheType == proto.CacheTypeMemcache || cc.CacheType == proto.CacheTypeMemcacheBinary || cc.CacheType == proto.CacheTypeRedis {
+		ring := hashkit.NewRing(cc.HashDistribution, cc.HashMethod)
 		if c.alias {
 			ring.Init(ans, ws)
 		} else {
 			ring.Init(addrs, ws)
 		}
+		c.ring = ring
+		c.router = ring
+	} else if cc.CacheType == proto.CacheTypeRedisCluster {
+		c.router = rdsclus.Router()
 	} else {
 		panic("unsupported protocol")
 	}
@@ -116,8 +126,7 @@ func NewCluster(ctx context.Context, cc *ClusterConfig) (c *Cluster) {
 	c.aliasMap = aliasMap
 	c.nodeChan = nodeChan
 	c.nodeMap = nodeMap
-	c.ring = ring
-	if c.cc.PingAutoEject {
+	if c.cc.PingAutoEject && cc.CacheType != proto.CacheTypeRedisCluster {
 		go c.startPinger(c.cc, addrs, ws)
 	}
 	return
@@ -257,7 +266,7 @@ func (c *Cluster) hash(key []byte) (node string, ok bool) {
 	if len(realKey) == 0 {
 		realKey = key
 	}
-	node, ok = c.ring.GetNode(realKey)
+	node, ok = c.router.GetNode(realKey)
 	return
 }
 

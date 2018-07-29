@@ -18,6 +18,7 @@ const (
 	CacheTypeMemcache       CacheType = "memcache"
 	CacheTypeMemcacheBinary CacheType = "memcache_binary"
 	CacheTypeRedis          CacheType = "redis"
+	CacheTypeRedisCluster   CacheType = "redis_cluster"
 )
 
 // Request request interface.
@@ -41,4 +42,10 @@ type NodeConn interface {
 
 	Ping() error
 	Close() error
+}
+
+// Router is cluster router.
+// TODO(felix): refactor router!!!
+type Router interface {
+	GetNode([]byte) (string, bool)
 }

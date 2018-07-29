@@ -159,7 +159,7 @@ func (pc *proxyConn) decode(m *proto.Message) (err error) {
 func nextReq(m *proto.Message) *Request {
 	req := m.NextReq()
 	if req == nil {
-		r := getReq()
+		r := GetReq()
 		m.WithRequest(r)
 		return r
 	}

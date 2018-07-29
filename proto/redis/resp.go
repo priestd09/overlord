@@ -39,6 +39,14 @@ type resp struct {
 	arrayn int
 }
 
+func(r *resp) Type() byte {
+	return r.rTp
+}
+
+func(r *resp) Data() []byte {
+	return r.data
+}
+
 func (r *resp) reset() {
 	r.rTp = respUnknown
 	r.data = nil

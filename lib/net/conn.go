@@ -38,11 +38,6 @@ func NewConn(sock net.Conn, readTimeout, writeTimeout time.Duration) (c *Conn) {
 	return
 }
 
-// Dup will re-dial to the given addr by using timeouts stored in itself.
-func (c *Conn) Dup() *Conn {
-	return DialWithTimeout(c.addr, c.dialTimeout, c.readTimeout, c.writeTimeout)
-}
-
 // ReConnect re connect.
 func (c *Conn) ReConnect() (err error) {
 	if c.Conn != nil {
@@ -74,6 +69,9 @@ func (c *Conn) Read(b []byte) (n int, err error) {
 			return
 		}
 	}
+	if c.Conn == nil {
+		return 0, ErrConnClosed
+	}
 	n, err = c.Conn.Read(b)
 	c.err = err
 	return
@@ -93,9 +91,20 @@ func (c *Conn) Write(b []byte) (n int, err error) {
 			return
 		}
 	}
+	if c.Conn == nil {
+		return 0, ErrConnClosed
+	}
 	n, err = c.Conn.Write(b)
 	c.err = err
 	return
+}
+
+// Writev impl the net.buffersWriter to support writev
+func (c *Conn) Writev(buf *net.Buffers) (int64, error) {
+	if c.Conn == nil {
+		return 0, ErrConnClosed
+	}
+	return buf.WriteTo(c.Conn)
 }
 
 // Close close conn.
@@ -105,12 +114,4 @@ func (c *Conn) Close() error {
 		return c.Conn.Close()
 	}
 	return nil
-}
-
-// Writev impl the net.buffersWriter to support writev
-func (c *Conn) Writev(buf *net.Buffers) (int64, error) {
-	if c.Conn == nil {
-		return 0, ErrConnClosed
-	}
-	return buf.WriteTo(c.Conn)
 }

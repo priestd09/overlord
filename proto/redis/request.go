@@ -188,8 +188,8 @@ var reqPool = &sync.Pool{
 	},
 }
 
-// getReq get the msg from pool
-func getReq() *Request {
+// GetReq get the msg from pool
+func GetReq() *Request {
 	return reqPool.Get().(*Request)
 }
 
@@ -240,6 +240,11 @@ func (r *Request) Put() {
 	r.reply.reset()
 	r.mType = mergeTypeNo
 	reqPool.Put(r)
+}
+
+// Reply return reply resp.
+func (r *Request) Reply() *resp {
+	return r.reply
 }
 
 // isSupport check command support.
