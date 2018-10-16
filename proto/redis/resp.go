@@ -1,10 +1,10 @@
 package redis
 
 import (
-	"overlord/lib/bufio"
-	"overlord/lib/conv"
 	"bytes"
 	"fmt"
+	"overlord/lib/bufio"
+	"overlord/lib/conv"
 )
 
 // respType is the type of redis resp
@@ -71,7 +71,7 @@ type resp struct {
 
 func (r *resp) reset() {
 	r.rTp = respUnknown
-	r.data = nil
+	r.data = r.data[:0]
 	r.arrayn = 0
 }
 
@@ -110,8 +110,9 @@ func (r *resp) decode(br *bufio.Reader) (err error) {
 	r.rTp = rTp
 	switch rTp {
 	case respString, respInt, respError:
-		r.data = make([]byte, len(line) - 2 -1)
-		copy(r.data, line[1 : len(line)-2])
+		// r.data = make([]byte, len(line) - 2 -1)
+		// copy(r.data, line[1 : len(line)-2])
+		r.data = append(r.data, line[1:len(line)-2]...)
 	case respBulk:
 		err = r.decodeBulk(line, br)
 	case respArray:
@@ -136,10 +137,10 @@ func (r *resp) decodeInline(line []byte) (err error) {
 	r.rTp = respArray
 
 	for i, field := range fields {
-		r.array[i] = &resp {
-			rTp: respBulk,
-			data: []byte(fmt.Sprintf("%d\r\n%c", len(field), field)),
-			array: nil,
+		r.array[i] = &resp{
+			rTp:    respBulk,
+			data:   []byte(fmt.Sprintf("%d\r\n%c", len(field), field)),
+			array:  nil,
 			arrayn: 0,
 		}
 	}
@@ -166,8 +167,9 @@ func (r *resp) decodeBulk(line []byte, br *bufio.Reader) (err error) {
 	} else if err != nil {
 		return
 	}
-	r.data = make([]byte, len(data)-2)
-	copy(r.data, data[:len(data)-2])
+	// r.data = make([]byte, len(data)-2)
+	// copy(r.data, data[:len(data)-2])
+	r.data = append(r.data, line[:len(data)-2]...)
 	return
 }
 
@@ -182,8 +184,9 @@ func (r *resp) decodeArray(line []byte, br *bufio.Reader) (err error) {
 		r.data = nil
 		return
 	}
-	r.data = make([]byte, len(sBs))
-	copy(r.data, sBs)
+	// r.data = make([]byte, len(sBs))
+	// copy(r.data, sBs)
+	r.data = append(r.data, sBs...)
 	mark := br.Mark()
 	for i := 0; i < int(size); i++ {
 		nre := r.next()
