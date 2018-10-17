@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-const evalArgsMinCount int = 4;
+const evalArgsMinCount int = 4
 
 var (
 	emptyBytes = []byte("")
@@ -124,7 +124,7 @@ var (
 		"15\r\nZREMRANGEBYRANK" +
 		"16\r\nZREMRANGEBYSCORE" +
 		"5\r\nPFADD" +
-		"7\r\nPFMERGE"+
+		"7\r\nPFMERGE" +
 		"4\r\nEVAL")
 
 	reqNotSupportCmdsBytes = []byte("" +
