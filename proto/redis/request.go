@@ -29,6 +29,7 @@ var (
 	reqWriteCmdsMap      = make(map[string]struct{})
 	reqNotSupportCmdsMap = make(map[string]struct{})
 	reqCtlCmdsMap        = make(map[string]struct{})
+	reqSupportCmdsMap    = make(map[string]struct{})
 )
 
 func fillMap(mapping map[string]struct{}, keys []string) {
@@ -55,6 +56,10 @@ func init() {
 
 	ctlCmds := []string{"4\r\nQUIT", "4\r\nPING"}
 	fillMap(reqCtlCmdsMap, ctlCmds)
+
+	fillMap(reqSupportCmdsMap, readCmds)
+	fillMap(reqSupportCmdsMap, writeCmds)
+	fillMap(reqSupportCmdsMap, ctlCmds)
 }
 
 // errors
@@ -166,9 +171,8 @@ func (r *Request) IsSupport() bool {
 	if r.resp.arrayn < 1 {
 		return false
 	}
-	data := r.resp.array[0].data
-	key := *(*string)(unsafe.Pointer(&data))
-	return contains(reqReadCmdsMap, key) || contains(reqWriteCmdsMap, key) || contains(reqCtlCmdsMap, key)
+	key := *(*string)(unsafe.Pointer(&r.resp.array[0].data))
+	return contains(reqSupportCmdsMap, key)
 }
 
 // IsCtl is control command.
