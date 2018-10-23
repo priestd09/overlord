@@ -4,7 +4,6 @@ import (
 	"sync"
 	"time"
 
-	"overlord/lib/bufio"
 	"overlord/lib/log"
 	"overlord/lib/prom"
 
@@ -48,6 +47,7 @@ func (m *MsgBatchAllocator) MsgBatchs() map[string]*MsgBatch {
 	return m.mbMap
 }
 
+// GetBatch will get the given batch
 func (m *MsgBatchAllocator) GetBatch(node string) *MsgBatch {
 	return m.mbMap[node]
 }
@@ -92,7 +92,6 @@ var msgBatchPool = &sync.Pool{
 	New: func() interface{} {
 		return &MsgBatch{
 			msgs: make([]*Message, defaultMsgBatchSize),
-			buf:  bufio.Get(defaultRespBufSize),
 			IsDone: false,
 		}
 	},
@@ -105,7 +104,6 @@ func NewMsgBatch() *MsgBatch {
 
 // MsgBatch is a single execute unit
 type MsgBatch struct {
-	buf   *bufio.Buffer
 	msgs  []*Message
 	count int
 	IsDone bool
@@ -136,16 +134,10 @@ func (m *MsgBatch) Nth(i int) *Message {
 	return nil
 }
 
-// Buffer will send back buffer to executor
-func (m *MsgBatch) Buffer() *bufio.Buffer {
-	return m.buf
-}
-
 // Reset will reset all the field as initial value but msgs
 func (m *MsgBatch) Reset() {
 	m.count = 0
 	m.IsDone = false
-	m.buf.Reset()
 }
 
 // Msgs returns a slice of Msg
