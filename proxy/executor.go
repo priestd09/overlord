@@ -324,16 +324,11 @@ func parseServers(svrs []string) (addrs []string, ws []int, ans []string, alias 
 	return
 }
 
-type pipePod struct {
-	mbs           []*proto.MsgBatch
-	isReConnected bool
-}
-
 type pipeExecutor struct {
 	cc     *ClusterConfig
 	addr   string
 	input  <-chan *proto.MsgBatch
-	awake  chan *pipePod
+	forward chan *proto.MsgBatch
 	nc     atomic.Value
 	cursor uint32
 	local  []*proto.MsgBatch
@@ -341,12 +336,12 @@ type pipeExecutor struct {
 
 func spawnPipeExecutor(addr string, cc *ClusterConfig, nb <-chan *proto.MsgBatch) {
 	nc := newNodeConn(cc, addr)
-	awake := make(chan *pipePod, 64)
+	forward := make(chan *proto.MsgBatch, 256)
 	pe := &pipeExecutor{
 		cc:     cc,
 		addr:   addr,
 		input:  nb,
-		awake:  awake,
+		forward:  forward,
 		cursor: 0,
 		local:  make([]*proto.MsgBatch, maxMsgBatchs),
 	}
@@ -354,15 +349,6 @@ func spawnPipeExecutor(addr string, cc *ClusterConfig, nb <-chan *proto.MsgBatch
 
 	go pe.executeDown()
 	go pe.executeRecv()
-}
-
-func (pe *pipeExecutor) trySelectChan() *proto.MsgBatch {
-	select {
-	case mb := <-pe.input:
-		return mb
-	default:
-		return nil
-	}
 }
 
 const maxConcurrency = 1024
@@ -377,11 +363,15 @@ func (pe *pipeExecutor) executeDown() {
 	for {
 		for {
 			if mb == nil {
-				mb = pe.trySelectChan()
+				select {
+				case mb = <-pe.input:
+				default:
+				}
 				if mb == nil {
 					break
 				}
 			}
+
 			if err = nc.WriteBatch(mb); err != nil {
 				mb.DoneWithError(pe.cc.Name, pe.addr, err)
 			}
@@ -395,7 +385,6 @@ func (pe *pipeExecutor) executeDown() {
 		}
 
 		if count > 0 {
-			isReconnected := false
 			if err = nc.Flush(); err != nil {
 				log.Warnf("flush error for pipeExecutor down due to %s", err)
 				for _, lmb := range pe.local[:pe.cursor] {
@@ -406,12 +395,11 @@ func (pe *pipeExecutor) executeDown() {
 				}
 				nc = newNodeConn(pe.cc, pe.addr)
 				pe.nc.Store(nc)
-				isReconnected = true
 			}
 
-			mbs := make([]*proto.MsgBatch, pe.cursor)
-			copy(mbs, pe.local[:pe.cursor])
-			pe.awake <- &pipePod{mbs: mbs, isReConnected: isReconnected}
+			for _, lmb := range pe.local {
+				pe.forward <- lmb
+			}
 			pe.cursor = 0
 			count = 0
 		}
@@ -423,23 +411,15 @@ func (pe *pipeExecutor) executeRecv() {
 	var err error
 	var nc = (pe.nc.Load()).(proto.NodeConn)
 	for {
-		pp := <-pe.awake
-		if pp.isReConnected {
-			nc = (pe.nc.Load()).(proto.NodeConn)
-		}
-		for _, mb := range pp.mbs {
-			// FIXME: check is done
-			// if mb.IsDone {
-			// log.Infof("IsDone is going on for %v", *mb)
-			// continue
-			// }
-
-			if err = nc.ReadBatch(mb); err != nil {
-				err = errors.Wrap(err, "Cluster batch read")
-				mb.DoneWithError(pe.cc.Name, pe.addr, err)
-			} else {
-				mb.Done(pe.cc.Name, pe.addr)
-			}
+		mb := <-pe.forward
+		// if pp.isReConnected {
+		// 	nc = (pe.nc.Load()).(proto.NodeConn)
+		// }
+		if err = nc.ReadBatch(mb); err != nil {
+			err = errors.Wrap(err, "Cluster batch read")
+			mb.DoneWithError(pe.cc.Name, pe.addr, err)
+		} else {
+			mb.Done(pe.cc.Name, pe.addr)
 		}
 	}
 }

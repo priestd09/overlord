@@ -184,10 +184,7 @@ func (w *Writer) Flush() error {
 	return w.err
 }
 
-// Write writes the contents of p into the buffer.
-// It returns the number of bytes written.
-// If nn < len(p), it also returns an error explaining
-// why the write is short.
+// Write writes the contents of p into the IoVec buffer.
 func (w *Writer) Write(p []byte) (err error) {
 	if w.err != nil {
 		return w.err
@@ -197,7 +194,7 @@ func (w *Writer) Write(p []byte) (err error) {
 	}
 	w.bufs = append(w.bufs, p)
 	w.cnt++
-	if len(w.bufs) == maxWritevSize {
+	if w.cnt == maxWritevSize {
 		err = w.Flush()
 	}
 	return
