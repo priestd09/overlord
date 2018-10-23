@@ -84,7 +84,6 @@ func (m *MsgBatchAllocator) Reset(node string) {
 }
 
 const (
-	defaultRespBufSize  = 1024
 	defaultMsgBatchSize = 2
 )
 

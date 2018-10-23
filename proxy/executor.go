@@ -20,6 +20,7 @@ import (
 	rclstr "overlord/proto/redis/cluster"
 
 	"github.com/pkg/errors"
+	"runtime"
 )
 
 const (
@@ -143,13 +144,6 @@ func (e *defaultExecutor) Execute(mba *proto.MsgBatchAllocator, msgs []*proto.Me
 		mba.Add(1)
 		e.nodeChan[node].push(mba.GetBatch(node))
 	}
-	// for addr, mb := range mba.MsgBatchs() {
-	// 	if mb.Count() > 0 {
-	// 		// WaitGroup add one MsgBatch!!!
-	// 		mba.Add(1) // NOTE: important!!! for wait all MsgBatch done!!!
-	// 		e.nodeChan[addr].push(mb)
-	// 	}
-	// }
 	mba.Wait()
 	return nil
 }
@@ -169,6 +163,7 @@ func (e *defaultExecutor) process(cc *ClusterConfig, addr string) *batchChan {
 	for i := int32(0); i < conns; i++ {
 		ch := nbc.ch
 		spawnPipeExecutor(addr, cc, ch)
+		runtime.Gosched()
 	}
 	return nbc
 }
@@ -398,7 +393,6 @@ func (pe *pipeExecutor) executeDown() {
 				break
 			}
 		}
-		mb = nil
 
 		if count > 0 {
 			isReconnected := false
@@ -434,9 +428,11 @@ func (pe *pipeExecutor) executeRecv() {
 			nc = (pe.nc.Load()).(proto.NodeConn)
 		}
 		for _, mb := range pp.mbs {
-			if mb.IsDone {
-				continue
-			}
+			// FIXME: check is done
+			// if mb.IsDone {
+			// log.Infof("IsDone is going on for %v", *mb)
+			// continue
+			// }
 
 			if err = nc.ReadBatch(mb); err != nil {
 				err = errors.Wrap(err, "Cluster batch read")

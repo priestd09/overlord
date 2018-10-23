@@ -224,7 +224,7 @@ def main():
         port = int(sys.argv[1].strip())
 
     pool = Pool(20)
-    list(pool.map(run, range(100)))
+    list(pool.map(run, range(20)))
 
 
 if __name__ == "__main__":
