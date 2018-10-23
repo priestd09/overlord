@@ -113,7 +113,7 @@ func (n *nodeConn) ReadBatch(mb *proto.MsgBatch) (err error) {
 		return
 	}
 	defer n.br.ResetBuffer(nil)
-	n.br.ResetBuffer(mb.Buffer())
+	// n.br.ResetBuffer(mb.Buffer())
 	var (
 		size   int
 		cursor int
