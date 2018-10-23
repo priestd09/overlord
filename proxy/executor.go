@@ -168,70 +168,9 @@ func (e *defaultExecutor) process(cc *ClusterConfig, addr string) *batchChan {
 	nbc := newBatchChan(conns)
 	for i := int32(0); i < conns; i++ {
 		ch := nbc.ch
-		nc := newNodeConn(cc, addr)
-		spawnPipe(addr, cc, ch, nc)
+		spawnPipeExecutor(addr, cc, ch)
 	}
 	return nbc
-}
-
-func (e *defaultExecutor) processIO(cluster, addr string, ch <-chan *proto.MsgBatch, nc proto.NodeConn) {
-	// TODO: merge msgbatch for backend
-	// TODO: split write and read for backend
-	// TODO: remove magic number
-	var mbs = make([]*proto.MsgBatch, 64)
-	var cursor = 0
-	var quick = false
-	var err error
-	for {
-		if err != nil {
-			_ = nc.Close()
-			nc = newNodeConn(e.cc, addr)
-			err = nil
-		}
-
-		select {
-		case mb := <-ch:
-			mbs[cursor] = mb
-			cursor++
-		default:
-			quick = true
-		}
-
-		if (quick && cursor > 0) || (cursor == 64) {
-			quick = false
-			for _, mb := range mbs[:cursor] {
-				if err = nc.WriteBatch(mb); err != nil {
-					err = errors.Wrap(err, "Cluster batch write")
-					mb.DoneWithError(cluster, addr, err)
-					goto deferReset
-				}
-			}
-
-			if err = nc.Flush(); err != nil {
-				err = errors.Wrap(err, "Cluster batch flush")
-				for _, mb := range mbs[:cursor] {
-					mb.DoneWithError(cluster, addr, err)
-				}
-				goto deferReset
-			}
-
-			for _, mb := range mbs[:cursor] {
-				if err = nc.ReadBatch(mb); err != nil {
-					err = errors.Wrap(err, "Cluster batch read")
-					mb.DoneWithError(cluster, addr, err)
-					continue
-				}
-				mb.Done(cluster, addr)
-			}
-		deferReset:
-			cursor = 0
-		} else {
-			mb := <-ch
-			mbs[cursor] = mb
-			cursor++
-		}
-
-	}
 }
 
 func (e *defaultExecutor) processPing(p *pinger) {
@@ -390,100 +329,219 @@ func parseServers(svrs []string) (addrs []string, ws []int, ans []string, alias 
 	return
 }
 
-type executorDown struct {
-	cc      *ClusterConfig
-	addr    string
-	input   <-chan *proto.MsgBatch
-	forward chan<- *proto.MsgBatch
-	nc      proto.NodeConn
-	local   []*proto.MsgBatch
+type pipePod struct {
+	mbs           []*proto.MsgBatch
+	isReConnected bool
 }
 
-func (ed *executorDown) spawn() {
+type pipeExecutor struct {
+	cc     *ClusterConfig
+	addr   string
+	input  <-chan *proto.MsgBatch
+	awake  chan pipePod
+	nc     atomic.Value
+	cursor uint32
+	local  []*proto.MsgBatch
+}
+
+func spawnPipeExecutor(addr string, cc *ClusterConfig, nb <-chan *proto.MsgBatch) {
+	nc := newNodeConn(cc, addr)
+	awake := make(chan pipePod, 64)
+	pe := &pipeExecutor{
+		cc:     cc,
+		addr:   addr,
+		input:  nb,
+		awake:  awake,
+		cursor: 0,
+		local:  make([]*proto.MsgBatch, maxMsgBatchs),
+	}
+	pe.nc.Store(nc)
+
+	go pe.executeDown()
+	go pe.executeRecv()
+}
+
+func (pe *pipeExecutor) trySelectChan() *proto.MsgBatch {
+	select {
+	case mb := <-pe.input:
+		return mb
+	default:
+		return nil
+	}
+}
+
+const maxConcurrency = 1024
+const maxMsgBatchs = 256
+
+func (pe *pipeExecutor) executeDown() {
+	var err error
+	var mb *proto.MsgBatch
 	var count int
-	var err error
+	var nc = (pe.nc.Load()).(proto.NodeConn)
+
 	for {
-		if err != nil {
-			_ = ed.nc.Close()
-			ed.nc = newNodeConn(ed.cc, ed.addr)
-			err = nil
-		}
-
-		select {
-		case mb := <-ed.input:
-			if err = ed.nc.WriteBatch(mb); err != nil {
-				err = errors.Wrap(err, "Cluster batch write")
-				mb.DoneWithError(ed.cc.Name, ed.addr, err)
-			}
-			ed.local[count] = mb
-			count++
-			if count < 64 {
-				continue
-			}
-		default:
-		}
-
-		if count != 0 {
-			if err = ed.nc.Flush(); err != nil {
-				for _, mb := range ed.local {
-					mb.DoneWithError(ed.cc.Name, ed.addr, err)
+		for {
+			if mb == nil {
+				mb = pe.trySelectChan()
+				if mb == nil {
+					break
 				}
-				count = 0
+			}
+			if err = nc.WriteBatch(mb); err != nil {
+				mb.DoneWithError(pe.cc.Name, pe.addr, err)
+			}
+			pe.local[pe.cursor] = mb
+			pe.cursor++
+			count += mb.Count()
+			mb = nil
+			if count >= maxConcurrency || pe.cursor >= maxMsgBatchs {
+				break
+			}
+		}
+		mb = nil
+
+		if count > 0 {
+			isReconnected := false
+			if err = nc.Flush(); err != nil {
+				log.Warnf("flush error for pipeExecutor down due to %s", err)
+				for _, lmb := range pe.local[:pe.cursor] {
+					if lmb.IsDone {
+						continue
+					}
+					lmb.DoneWithError(pe.cc.Name, pe.addr, err)
+				}
+				nc = newNodeConn(pe.cc, pe.addr)
+				pe.nc.Store(nc)
+				isReconnected = true
+			}
+
+			mbs := make([]*proto.MsgBatch, pe.cursor)
+			copy(mbs, pe.local[:pe.cursor])
+			pe.awake <- pipePod{mbs: mbs, isReConnected: isReconnected}
+			pe.cursor = 0
+			count = 0
+		}
+		mb = <-pe.input
+	}
+}
+
+func (pe *pipeExecutor) executeRecv() {
+	var err error
+	var nc = (pe.nc.Load()).(proto.NodeConn)
+	for {
+		pp := <-pe.awake
+		if pp.isReConnected {
+			nc = (pe.nc.Load()).(proto.NodeConn)
+		}
+		for _, mb := range pp.mbs {
+			if mb.IsDone {
 				continue
 			}
-			for _, mb := range ed.local[:count] {
-				ed.forward <- mb
+
+			if err = nc.ReadBatch(mb); err != nil {
+				err = errors.Wrap(err, "Cluster batch read")
+				mb.DoneWithError(pe.cc.Name, pe.addr, err)
+			} else {
+				mb.Done(pe.cc.Name, pe.addr)
 			}
-			count = 0
-		} else {
-			mb := <-ed.input
-			if err = ed.nc.WriteBatch(mb); err != nil {
-				err = errors.Wrap(err, "Cluster batch write")
-				mb.DoneWithError(ed.cc.Name, ed.addr, err)
-			}
-			ed.local[count] = mb
-			count++
 		}
 	}
 }
 
-type executorRecv struct {
-	cluster string
-	addr    string
-	recv    <-chan *proto.MsgBatch
-	nc      proto.NodeConn
-}
+// type executorDown struct {
+// 	cc      *ClusterConfig
+// 	addr    string
+// 	input   <-chan *proto.MsgBatch
+// 	forward chan<- *proto.MsgBatch
+// 	nc      proto.NodeConn
+// 	local   []*proto.MsgBatch
+// }
 
-func (er *executorRecv) spawn() {
-	var err error
-	for {
-		mb := <-er.recv
-		if err = er.nc.ReadBatch(mb); err != nil {
-			err = errors.Wrap(err, "Cluster batch read")
-			mb.DoneWithError(er.cluster, er.addr, err)
-		} else {
-			mb.Done(er.cluster, er.addr)
-		}
-	}
-}
+// func (ed *executorDown) spawn() {
+// 	var count int
+// 	var err error
+// 	for {
+// 		if err != nil {
+// 			_ = ed.nc.Close()
+// 			ed.nc = newNodeConn(ed.cc, ed.addr)
+// 			err = nil
+// 		}
 
-func spawnPipe(addr string, cc *ClusterConfig, nb <-chan *proto.MsgBatch, nc proto.NodeConn) {
-	forward := make(chan *proto.MsgBatch, len(nb))
-	ed := &executorDown{
-		cc:      cc,
-		addr:    addr,
-		input:   nb,
-		forward: forward,
-		nc:      nc,
-		local:   make([]*proto.MsgBatch, 64),
-	}
-	go ed.spawn()
+// 		select {
+// 		case mb := <-ed.input:
+// 			if err = ed.nc.WriteBatch(mb); err != nil {
+// 				err = errors.Wrap(err, "Cluster batch write")
+// 				mb.DoneWithError(ed.cc.Name, ed.addr, err)
+// 			}
+// 			ed.local[count] = mb
+// 			count++
+// 			if count < 64 {
+// 				continue
+// 			}
+// 		default:
+// 		}
 
-	er := &executorRecv{
-		cluster: cc.Name,
-		addr:    addr,
-		recv:    forward,
-		nc:      nc,
-	}
-	go er.spawn()
-}
+// 		if count != 0 {
+// 			if err = ed.nc.Flush(); err != nil {
+// 				for _, mb := range ed.local {
+// 					mb.DoneWithError(ed.cc.Name, ed.addr, err)
+// 				}
+// 				count = 0
+// 				continue
+// 			}
+// 			for _, mb := range ed.local[:count] {
+// 				ed.forward <- mb
+// 			}
+// 			count = 0
+// 		} else {
+// 			mb := <-ed.input
+// 			if err = ed.nc.WriteBatch(mb); err != nil {
+// 				err = errors.Wrap(err, "Cluster batch write")
+// 				mb.DoneWithError(ed.cc.Name, ed.addr, err)
+// 			}
+// 			ed.local[count] = mb
+// 			count++
+// 		}
+// 	}
+// }
+
+// type executorRecv struct {
+// 	cluster string
+// 	addr    string
+// 	recv    <-chan *proto.MsgBatch
+// 	nc      proto.NodeConn
+// }
+
+// func (er *executorRecv) spawn() {
+// 	var err error
+// 	for {
+// 		mb := <-er.recv
+// 		if err = er.nc.ReadBatch(mb); err != nil {
+// 			err = errors.Wrap(err, "Cluster batch read")
+// 			mb.DoneWithError(er.cluster, er.addr, err)
+// 		} else {
+// 			mb.Done(er.cluster, er.addr)
+// 		}
+// 	}
+// }
+
+// func spawnPipe(addr string, cc *ClusterConfig, nb <-chan *proto.MsgBatch, nc proto.NodeConn) {
+// 	forward := make(chan *proto.MsgBatch, len(nb))
+// 	ed := &executorDown{
+// 		cc:      cc,
+// 		addr:    addr,
+// 		input:   nb,
+// 		forward: forward,
+// 		nc:      nc,
+// 		local:   make([]*proto.MsgBatch, 64),
+// 	}
+// 	go ed.spawn()
+
+// 	er := &executorRecv{
+// 		cluster: cc.Name,
+// 		addr:    addr,
+// 		recv:    forward,
+// 		nc:      nc,
+// 	}
+// 	go er.spawn()
+// }

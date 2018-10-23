@@ -93,6 +93,7 @@ var msgBatchPool = &sync.Pool{
 		return &MsgBatch{
 			msgs: make([]*Message, defaultMsgBatchSize),
 			buf:  bufio.Get(defaultRespBufSize),
+			IsDone: false,
 		}
 	},
 }
@@ -107,6 +108,7 @@ type MsgBatch struct {
 	buf   *bufio.Buffer
 	msgs  []*Message
 	count int
+	IsDone bool
 
 	wg *sync.WaitGroup
 }
@@ -142,6 +144,7 @@ func (m *MsgBatch) Buffer() *bufio.Buffer {
 // Reset will reset all the field as initial value but msgs
 func (m *MsgBatch) Reset() {
 	m.count = 0
+	m.IsDone = false
 	m.buf.Reset()
 }
 
@@ -160,6 +163,7 @@ func (m *MsgBatch) Done(cluster, addr string) {
 	if m.wg != nil {
 		m.wg.Done()
 	}
+	m.IsDone = true
 }
 
 // DoneWithError will set done with error and report prom ErrIncr.
@@ -176,4 +180,5 @@ func (m *MsgBatch) DoneWithError(cluster, addr string, err error) {
 	if m.wg != nil {
 		m.wg.Done()
 	}
+	m.IsDone = true
 }
