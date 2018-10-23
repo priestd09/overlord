@@ -333,7 +333,7 @@ type pipeExecutor struct {
 	cc     *ClusterConfig
 	addr   string
 	input  <-chan *proto.MsgBatch
-	awake  chan pipePod
+	awake  chan *pipePod
 	nc     atomic.Value
 	cursor uint32
 	local  []*proto.MsgBatch
@@ -341,7 +341,7 @@ type pipeExecutor struct {
 
 func spawnPipeExecutor(addr string, cc *ClusterConfig, nb <-chan *proto.MsgBatch) {
 	nc := newNodeConn(cc, addr)
-	awake := make(chan pipePod, 64)
+	awake := make(chan *pipePod, 64)
 	pe := &pipeExecutor{
 		cc:     cc,
 		addr:   addr,
@@ -411,7 +411,7 @@ func (pe *pipeExecutor) executeDown() {
 
 			mbs := make([]*proto.MsgBatch, pe.cursor)
 			copy(mbs, pe.local[:pe.cursor])
-			pe.awake <- pipePod{mbs: mbs, isReConnected: isReconnected}
+			pe.awake <- &pipePod{mbs: mbs, isReConnected: isReconnected}
 			pe.cursor = 0
 			count = 0
 		}
