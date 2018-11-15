@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"overlord/proto"
-	"overlord/task"
+	"overlord/job"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -23,7 +23,7 @@ func TestSet(t *testing.T) {
 	e, err := New("http://172.22.33.167:2379")
 	ctx := context.TODO()
 	assert.NoError(t, err)
-	task := task.Task{
+	job := job.Job{
 		Name:      "test",
 		CacheType: proto.CacheTypeMemcache,
 		Version:   "1.5.12",
@@ -31,9 +31,9 @@ func TestSet(t *testing.T) {
 		MaxMem:    10,
 		CPU:       0.1,
 	}
-	bs, err := json.Marshal(task)
+	bs, err := json.Marshal(job)
 	assert.NoError(t, err)
-	err = e.Set(ctx, "/overlord/task/task1", string(bs))
+	err = e.Set(ctx, "/overlord/job/job1", string(bs))
 	assert.NoError(t, err)
 
 }
