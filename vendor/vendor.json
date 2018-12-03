@@ -27,6 +27,12 @@
 			"revisionTime": "2018-02-02T18:43:18Z"
 		},
 		{
+			"checksumSHA1": "jDMs5PLeguOPNiCWvxzv3tOy8K0=",
+			"path": "github.com/kavu/go_reuseport",
+			"revision": "ffa96de2479e10ecd06aca8069bf9c55a86701b5",
+			"revisionTime": "2018-08-25T10:15:11Z"
+		},
+		{
 			"checksumSHA1": "bKMZjd2wPw13VwoE7mBeSv5djFA=",
 			"path": "github.com/matttproud/golang_protobuf_extensions/pbutil",
 			"revision": "c12348ce28de40eed0136aa2b644d0ee0650e56c",

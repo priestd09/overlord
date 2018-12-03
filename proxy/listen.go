@@ -5,17 +5,23 @@ import (
 	"os"
 
 	"github.com/pkg/errors"
+	"github.com/kavu/go_reuseport"
 )
 
 // Listen listen.
 func Listen(proto string, addr string) (net.Listener, error) {
 	switch proto {
 	case "tcp":
-		return listenTCP(addr)
+		return listenTCPReuseport(addr)
 	case "unix":
 		return listenUnix(addr)
 	}
 	return nil, errors.New("no support proto")
+}
+
+
+func listenTCPReuseport(addr string) (net.Listener, error) {
+	return reuseport.Listen("tcp", addr)
 }
 
 func listenTCP(addr string) (net.Listener, error) {
