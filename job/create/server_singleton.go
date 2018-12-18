@@ -31,6 +31,22 @@ type CacheJob struct {
 	info *CacheInfo
 }
 
+func (c *CacheJob) setupPorts() error {
+	sub, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c.e.SetJobState(sub, c.info.Group, c.info.JobID, SubStateSetupPorts)
+
+	for _, addr := range c.info.Dist.Addrs {
+		port, err := genAgentPortSequence(sub, c.e, addr.IP)
+		if err != nil {
+			return err
+		}
+		addr.Port = int(port)
+	}
+	return nil
+}
+
 func (c *CacheJob) saveTplFile(ctx context.Context, path, conf, name string, data map[string]interface{}) error {
 	tpl, err := template.New(name).Parse(conf)
 	if err != nil {
@@ -166,7 +182,12 @@ func (c *CacheJob) setupInstanceDir() error {
 
 // Create Cache instance
 func (c *CacheJob) Create() error {
-	err := c.setupInstanceDir()
+	err := c.setupPorts()
+	if err != nil {
+		return err
+	}
+
+	err = c.setupInstanceDir()
 	if err != nil {
 		return err
 	}

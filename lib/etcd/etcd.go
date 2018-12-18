@@ -32,6 +32,7 @@ const (
 	SpecsDir            = "/overlord/specs"
 	FileServer          = "/overlord/fs"
 	PortSequence        = "/overlord/port_sequence"
+	AgentPortSequence   = "/overlord/agent_ports"
 )
 
 // define watch event

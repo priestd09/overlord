@@ -19,10 +19,11 @@ const (
 
 // define subjob state
 const (
-	SubStatePending = "pending"
-	SubStateRunning = "running"
-	SubStateDivide = "divide_slots"
-	SubStateSetupIDMap = "setup_idmap"
+	SubStatePending      = "pending"
+	SubStateRunning      = "running"
+	SubStateDivide       = "divide_slots"
+	SubStateSetupIDMap   = "setup_idmap"
+	SubStateSetupPorts   = "setup_ports"
 	SubStateSetupSlaveOf = "setup_slaveof"
 )
 
@@ -42,7 +43,12 @@ func NewRedisClusterJob(e *etcd.Etcd, info *CacheInfo) *RedisClusterJob {
 
 // Create creates new cluster and wait for cluster done
 func (c *RedisClusterJob) Create() error {
-	err := c.setupIDMap()
+	err := c.setupPorts()
+	if err != nil {
+		return err
+	}
+
+	err = c.setupIDMap()
 	if err != nil {
 		return err
 	}
@@ -206,5 +212,23 @@ func (c *RedisClusterJob) setupIDMap() error {
 		}
 	}
 	c.info.IDMap = idMap
+	return nil
+}
+
+func (c *RedisClusterJob) setupPorts() error {
+	sub, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c.e.SetJobState(sub, c.info.Group, c.info.JobID, SubStateSetupPorts)
+	for _, ck := range c.info.Chunks {
+		for _, node := range ck.Nodes {
+			// node.Name
+			port, err := genAgentPortSequence(sub, c.e, node.Name)
+			if err != nil {
+				return err
+			}
+			node.Port = int(port)
+		}
+	}
 	return nil
 }

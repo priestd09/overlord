@@ -390,7 +390,7 @@ func (s *Scheduler) acceptOffer(info *create.CacheInfo, dist *chunk.Dist, offers
 		s.db.SetTaskID(context.Background(), addr.String(), task.TaskID.GetValue()+","+task.AgentID.GetValue())
 		data := &TaskData{
 			IP:         addr.IP,
-			Port:       addr.Port,
+			// Port:       addr.Port,
 			DBEndPoint: s.c.DBEndPoint,
 		}
 		task.Data, _ = json.Marshal(data)
@@ -580,7 +580,7 @@ func (s *Scheduler) dispatchCluster(t job.Job, num int, mem, cpu float64, offers
 			//	s.db.Set(ctx context.Context, k string, v string)
 			data := &TaskData{
 				IP:         node.Name,
-				Port:       node.Port,
+				// Port:       node.Port,
 				DBEndPoint: s.c.DBEndPoint,
 			}
 			task.Data, _ = json.Marshal(data)
